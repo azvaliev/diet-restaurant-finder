@@ -23,11 +23,9 @@ try {
       case "tool-call":
         console.log(`\n[Calling ${part.toolName}]`);
         console.log(JSON.stringify(part.input, null, 2));
+        console.log();
         break;
       case "tool-result":
-        const output = "output" in part ? part.output : null;
-        const places = Array.isArray(output) ? output : [];
-        console.log(`[Found ${places.length} places]\n`);
         break;
     }
   }

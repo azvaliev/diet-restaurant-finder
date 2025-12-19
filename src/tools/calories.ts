@@ -1,20 +1,75 @@
-import { tool } from "ai";
+import { Output, stepCountIs, tool, ToolLoopAgent } from "ai";
 import z from "zod";
 import { webSearch } from "@exalabs/ai-sdk";
 import { env } from "../env.ts";
+import { model, providerOptions } from "../model.ts";
 
-export const getCalorieCountInfoInput = z.object({
+export const getCalorieCountInfoInputSchema = z.object({
   food: z.string().describe("The name of the food item to search for."),
   quantity: z
     .number()
     .min(0)
     .describe("The quantity of the food item to search for."),
   unit: z.string().describe("The unit of the food item to search for."),
+  additionalDetails: z
+    .string()
+    .optional()
+    .describe("Additional details about the food item."),
+});
+
+const getCalorieCountInfoOutputSchema = z.discriminatedUnion("success", [
+  z
+    .object({
+      success: z.literal(true),
+      calories: z.number().min(0).describe("rough estimate of calories"),
+      protein: z.number().min(0).describe("rough estimate of grams of protein"),
+    })
+    .describe("this is returned when we succesfuly got the information"),
+  z
+    .object({
+      success: z.literal(false),
+      error: z
+        .string()
+        .describe(
+          "error message to describe why we could not determine an answer",
+        ),
+      clarification_request: z
+        .string()
+        .optional()
+        .describe("prompting questions for the caller to add more details"),
+    })
+    .describe(
+      "this is returned when the user did not provide enough information for us to resolve the request",
+    ),
+]);
+
+const getCalorieCountInfoAgent = new ToolLoopAgent({
+  instructions:
+    `Based on the user's input, we need to determine a rough macronutrient estimate of the food item\n` +
+    `You can use the search tools to search for the food item and its nutritional information,\n` +
+    `breaking it down into components to search if necessary.\n` +
+    `IMPORTANT: If unsure, we would rather lean towards overestimating than underestimating`,
+  tools: {
+    webSearch: webSearch({
+      apiKey: env.exa.apiKey,
+      numResults: 5,
+      contents: {
+        livecrawl: "never",
+      },
+      excludeDomains: ["reddit.com"],
+    }),
+  },
+  stopWhen: stepCountIs(6),
+  model,
+  providerOptions,
+  output: Output.object({
+    schema: getCalorieCountInfoOutputSchema,
+  }),
 });
 
 export const getCalorieCountInfoTool = tool({
   description: "Get information about the calorie count of a food item",
-  inputSchema: getCalorieCountInfoInput,
+  inputSchema: getCalorieCountInfoInputSchema,
   inputExamples: [
     {
       input: {
@@ -24,17 +79,11 @@ export const getCalorieCountInfoTool = tool({
       },
     },
   ],
-  execute: async ({ food, quantity, unit }, opts) => {
-    const t = webSearch({
-      apiKey: env.exa.apiKey,
+  execute: async (input) => {
+    const res = await getCalorieCountInfoAgent.generate({
+      prompt: JSON.stringify(input),
     });
-
-    return await t.execute!(
-      {
-        query: `calories in ${quantity} ${unit} ${food}`,
-      },
-      opts,
-    );
+    return res.output;
   },
-  // outputSchema: webSearch().outputSchema,
+  outputSchema: getCalorieCountInfoOutputSchema,
 });
