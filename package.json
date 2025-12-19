@@ -6,7 +6,7 @@
     "start": "node --experimental-transform-types src/index.ts",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
-    "format": "prettier --write .",
+    "fmt": "prettier --write .",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -14,6 +14,7 @@
     "@exalabs/ai-sdk": "^1.0.5",
     "@googlemaps/places": "^2.2.0",
     "ai": "^6.0.0-beta.159",
+    "p-retry": "^7.1.1",
     "zod": "^4.2.1"
   },
   "devDependencies": {

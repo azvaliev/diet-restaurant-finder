@@ -6,7 +6,10 @@ import { APICallError } from "ai";
 const input = process.argv[2];
 
 if (!input) {
-  console.error("please provide input");
+  console.error('Usage: yarn start "<your food query>"');
+  console.error(
+    'Example: yarn start "Find healthy salad places in downtown Seattle, WA"',
+  );
   process.exit(1);
 }
 

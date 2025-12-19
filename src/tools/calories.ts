@@ -1,8 +1,9 @@
 import { Output, stepCountIs, tool, ToolLoopAgent } from "ai";
-import z from "zod";
+import { z } from "zod";
 import { webSearch } from "@exalabs/ai-sdk";
 import { env } from "../env.ts";
 import { model, providerOptions } from "../model.ts";
+import pRetry from "p-retry";
 
 export const getCalorieCountInfoInputSchema = z.object({
   food: z.string().describe("The name of the food item to search for."),
@@ -67,6 +68,20 @@ const getCalorieCountInfoAgent = new ToolLoopAgent({
   }),
 });
 
+/**
+ * Tool for retrieving calorie and macronutrient information for food items.
+ * Uses a nested agent with web search capabilities to find nutritional data.
+ * Returns either successful nutritional information or an error with optional clarification request.
+ *
+ * @example
+ * ```typescript
+ * const result = await getCalorieCountInfoTool.execute({
+ *   food: "neopolitan pizza with pepperoni and sausage",
+ *   quantity: 1,
+ *   unit: "whole pizza"
+ * });
+ * ```
+ */
 export const getCalorieCountInfoTool = tool({
   description: "Get information about the calorie count of a food item",
   inputSchema: getCalorieCountInfoInputSchema,
@@ -80,9 +95,14 @@ export const getCalorieCountInfoTool = tool({
     },
   ],
   execute: async (input) => {
-    const res = await getCalorieCountInfoAgent.generate({
-      prompt: JSON.stringify(input),
-    });
+    const res = await pRetry(
+      () =>
+        getCalorieCountInfoAgent.generate({
+          prompt: JSON.stringify(input),
+        }),
+      { retries: 2 },
+    );
+
     return res.output;
   },
   outputSchema: getCalorieCountInfoOutputSchema,

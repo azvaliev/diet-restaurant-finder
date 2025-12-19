@@ -6,6 +6,7 @@ const vercelAIProvider = createGateway({
   apiKey: env.aiGateway.apiKey,
 });
 
+// Using gpt-oss-120b to enable local inference eventually
 export const model = vercelAIProvider("openai/gpt-oss-120b");
 
 export const providerOptions = {

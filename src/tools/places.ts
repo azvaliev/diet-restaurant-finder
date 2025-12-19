@@ -5,6 +5,7 @@ import {
 } from "@googlemaps/places";
 import { tool } from "ai";
 import { z } from "zod";
+import pRetry from "p-retry";
 
 const PriceLevelSchema = z.enum([
   "PRICE_LEVEL_UNSPECIFIED",
@@ -14,11 +15,6 @@ const PriceLevelSchema = z.enum([
   "PRICE_LEVEL_EXPENSIVE",
   "PRICE_LEVEL_VERY_EXPENSIVE",
 ]);
-
-const LocalizedTextSchema = z.object({
-  text: z.string().nullish(),
-  languageCode: z.string().nullish(),
-});
 
 const AuthorAttributionSchema = z.object({
   displayName: z.string().nullish(),
@@ -30,8 +26,8 @@ const ReviewSchema = z.object({
   name: z.string().nullish(),
   relativePublishTimeDescription: z.string().nullish(),
   rating: z.number().min(1).max(5).nullish(),
-  text: LocalizedTextSchema.nullish(),
-  originalText: LocalizedTextSchema.nullish(),
+  text: z.string().nullish(),
+  originalText: z.string().nullish(),
   authorAttribution: AuthorAttributionSchema.nullish(),
   publishTime: z.string().nullish(),
 });
@@ -61,16 +57,16 @@ const PhotoSchema = z.object({
 });
 
 export const PlaceSchema = z.object({
-  displayName: LocalizedTextSchema.nullish(),
+  displayName: z.string().nullish(),
   rating: z.number().min(1).max(5).nullish(),
   userRatingCount: z.number().nullish(),
   reviews: z.array(ReviewSchema).nullish(),
-  reviewSummary: LocalizedTextSchema.nullish(),
-  editorialSummary: LocalizedTextSchema.nullish(),
+  reviewSummary: z.string().nullish(),
+  editorialSummary: z.string().nullish(),
   regularOpeningHours: OpeningHoursSchema.nullish(),
   priceLevel: PriceLevelSchema.nullish(),
   photos: z.array(PhotoSchema).nullish(),
-  primaryTypeDisplayName: LocalizedTextSchema.nullish(),
+  primaryTypeDisplayName: z.string().nullish(),
   websiteUri: z.string().nullish(),
   googleMapsUri: z.string().nullish(),
   formattedAddress: z.string().nullish(),
@@ -82,6 +78,18 @@ const googleMapsPlacesClient = new GoogleMapsPlacesClient({
   apiKey: env.googleMaps.apiKey,
 });
 
+/**
+ * Tool for searching Google Maps Places API to find restaurants and food establishments.
+ * Returns a list of places matching the query and location criteria, filtered by minimum rating.
+ *
+ * @example
+ * ```typescript
+ * const places = await searchGoogleMapsTool.execute({
+ *   query: "NY style pizza which offers slices",
+ *   location: { area: "midtown", city: "New York", state: "NY" }
+ * });
+ * ```
+ */
 export const searchGoogleMapsTool = tool({
   inputSchema: z.object({
     query: z
@@ -133,37 +141,41 @@ export const searchGoogleMapsTool = tool({
       ", " +
       location.state;
 
-    const res = await googleMapsPlacesClient.searchText(
-      {
-        textQuery,
-        minRating: 4,
-        priceLevels: [
-          protos.google.maps.places.v1.PriceLevel.PRICE_LEVEL_UNSPECIFIED,
-          protos.google.maps.places.v1.PriceLevel.PRICE_LEVEL_INEXPENSIVE,
-          protos.google.maps.places.v1.PriceLevel.PRICE_LEVEL_MODERATE,
-        ],
-      },
-      {
-        otherArgs: {
-          headers: {
-            "X-Goog-FieldMask": [
-              "places.displayName",
-              "places.rating",
-              "places.userRatingCount",
-              // "places.reviews",
-              "places.reviewSummary",
-              "places.editorialSummary",
-              "places.regularOpeningHours",
-              "places.priceLevel",
-              // "places.photos",
-              "places.primaryTypeDisplayName",
-              "places.websiteUri",
-              "places.googleMapsUri",
-              "places.formattedAddress",
-            ].join(","),
+    const res = await pRetry(
+      () =>
+        googleMapsPlacesClient.searchText(
+          {
+            textQuery,
+            minRating: 4,
+            priceLevels: [
+              protos.google.maps.places.v1.PriceLevel.PRICE_LEVEL_UNSPECIFIED,
+              protos.google.maps.places.v1.PriceLevel.PRICE_LEVEL_INEXPENSIVE,
+              protos.google.maps.places.v1.PriceLevel.PRICE_LEVEL_MODERATE,
+            ],
           },
-        },
-      },
+          {
+            otherArgs: {
+              headers: {
+                "X-Goog-FieldMask": [
+                  "places.displayName",
+                  "places.rating",
+                  "places.userRatingCount",
+                  // "places.reviews",
+                  "places.reviewSummary",
+                  "places.editorialSummary",
+                  "places.regularOpeningHours",
+                  "places.priceLevel",
+                  // "places.photos",
+                  "places.primaryTypeDisplayName",
+                  "places.websiteUri",
+                  "places.googleMapsUri",
+                  "places.formattedAddress",
+                ].join(","),
+              },
+            },
+          },
+        ),
+      { retries: 3 },
     );
 
     const places = res[0].places;
@@ -173,26 +185,28 @@ export const searchGoogleMapsTool = tool({
 
     return places.map(
       (place): Place => ({
-        displayName: place.displayName,
+        displayName: place.displayName?.text,
         rating: place.rating,
         userRatingCount: place.userRatingCount,
         reviews: place.reviews?.map((review) => ({
           name: review.name,
           relativePublishTimeDescription: review.relativePublishTimeDescription,
           rating: review.rating,
-          text: review.text,
-          originalText: review.originalText,
+          text: review.text?.text,
+          originalText: review.originalText?.text,
           authorAttribution: review.authorAttribution,
           publishTime: review.publishTime
             ? new Date(Number(review.publishTime.seconds) * 1000).toISOString()
             : null,
         })),
-        reviewSummary: place.reviewSummary?.text,
-        editorialSummary: place.editorialSummary,
+        reviewSummary: place.reviewSummary?.text?.text
+          ? place.reviewSummary.text.text
+          : null,
+        editorialSummary: place.editorialSummary?.text,
         regularOpeningHours: place.regularOpeningHours,
         priceLevel: place.priceLevel as Place["priceLevel"],
         photos: place.photos,
-        primaryTypeDisplayName: place.primaryTypeDisplayName,
+        primaryTypeDisplayName: place.primaryTypeDisplayName?.text,
         websiteUri: place.websiteUri,
         googleMapsUri: place.googleMapsUri,
         formattedAddress: place.formattedAddress,
@@ -200,40 +214,3 @@ export const searchGoogleMapsTool = tool({
     );
   },
 });
-
-// googleMapsPlacesClient
-//   .searchText(
-//     {
-//       textQuery: "best pizza in midtown, manhattan",
-//       minRating: 4,
-//       priceLevels: [
-//         protos.google.maps.places.v1.PriceLevel.PRICE_LEVEL_UNSPECIFIED,
-//         protos.google.maps.places.v1.PriceLevel.PRICE_LEVEL_INEXPENSIVE,
-//         protos.google.maps.places.v1.PriceLevel.PRICE_LEVEL_MODERATE,
-//       ],
-//     },
-//     {
-//       otherArgs: {
-//         headers: {
-//           "X-Goog-FieldMask": [
-//             "places.displayName",
-//             "places.rating",
-//             "places.userRatingCount",
-//             "places.reviews",
-//             "places.reviewSummary",
-//             "places.editorialSummary",
-//             "places.regularOpeningHours",
-//             "places.priceLevel",
-//             "places.photos",
-//             "places.primaryTypeDisplayName",
-//             "places.websiteUri",
-//             "places.googleMapsUri",
-//             "places.formattedAddress",
-//           ].join(","),
-//         },
-//       },
-//     },
-//   )
-//   .then((res) => {
-//     console.log(res[0].places);
-//   });
